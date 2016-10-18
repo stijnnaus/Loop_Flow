@@ -37,7 +37,7 @@ def smooth(data,n=3):
         data_smooth[i] = sm
     return data_smooth
     
-def EmissionProfile(loc_source, Ewidth, sourceStrength):
+def EmissionProfile(loc_source, sigE, sourceStrength):
     '''
     Generates an emission profile.
     '''
@@ -46,11 +46,8 @@ def EmissionProfile(loc_source, Ewidth, sourceStrength):
     for loc in loc_source:
         strength = (random.random() * sourceStrength)*dt
         add = random.random() # Correction so that max of source is not always in the middle of a cell
-        for i in range(loc-Ewidth/2,loc+1+Ewidth):
-            if i >= nx: # BC
-                E[i-nx] += norm.pdf(i,loc+add)*strength
-            else:
-                E[i] += norm.pdf(i,loc+add)*strength
+        for i in range(nx):
+            E[i] += norm.pdf(i,loc+add,sigE)*strength
     return np.array(E)
 
 def ForwardModel(E, Cstart,nt = ntStandard):
@@ -61,7 +58,7 @@ def ForwardModel(E, Cstart,nt = ntStandard):
     # Useful constants
     q = kap * dt/dx**2
     q2 = 2*q
-    s = u*dt/dx
+    s = 0.5*u*dt/dx
     lt = lamb*dt
     
     C = np.empty((nt+1,nx)) # Concentrations
@@ -95,20 +92,56 @@ def genData(C, loc_obs, ntime = 'none'):
     a gaussian with as sigma a certain percentage (Oerror) of the mean steady state
     concentration.
     '''
+
     random.seed(1)
     if ntime == 'none':
         ntime = len(C)
+    
     nobs = len(loc_obs)
+    Cpert = np.empty((ntime,nobs))
     
-    Cpert = np.empty((nobs, ntime))
-    
-    for i in range(nobs):
-        loc = loc_obs[i]
-        for j in range(ntime):
-            Cpert[i][j] =  np.random.normal(C[j][loc],Oerror)
+    if Oerror_real == 0.:
+        for i,loc in enumerate(loc_obs):
+            for j in range(ntime):
+                Cpert[j][i] = C[j][loc]
+    else:
+        for i,loc in enumerate(loc_obs):
+            for j in range(ntime):
+                Cpert[j][i] =  np.random.normal(C[j][loc],Oerror_real)
             
-    return np.array(Cpert.transpose().flatten())
+    return np.array(Cpert.flatten())
       
+def preCon(B_start, corrE,corrC):
+    '''
+    Preconditioning by applying a spatial correlation corr in matrix B.
+    '''
+    B_start = np.array(B_start)
+    empty = np.zeros((nx,nx))
+    E_precon = empty.copy()
+    C_precon = empty.copy()
+    errors = np.diag(B_start)
+    E_errors = errors[:nx]
+    C_errors = errors[nx:] 
+    
+        
+    for i in range(nx):
+        for j in range(nx):
+            if i == j:
+                E_precon[i][i] = E_errors[i]
+                C_precon[i][i] = C_errors[i]
+            else:
+                posi = abs(i-j)
+                corrEi = max(corrE[posi-1],corrE[nx-posi-1]) # BC emi
+                corrCi = max(corrC[posi-1],corrC[nx-posi-1]) # BC emi
+                E_precon[i][j] = corrEi*Eerror**2
+                C_precon[i][j] = corrCi*Cerror**2
+    # Putting them together
+    B_top = np.hstack((E_precon,empty))
+    B_bot = np.hstack((empty,C_precon))
+    B_precon = np.vstack((B_top,B_bot))
+    
+    return np.matrix(B_precon)
+                
 
 # +++++++++++++++++++++++++++++++++++++++++++++++++++
 # Inverse approach
@@ -189,11 +222,13 @@ def BLUEAnalysis(y, loc_obs, nt = ntStandard):
     
     # Constructing B: Two types of errors (Emission & Concentration)
     B = scs.csc_matrix(Bmatrix)
+    Ba = np.array(Bmatrix)
+    print ' B element [0][1] and [0][2]', Ba[0][1],Ba[0][2]
     
     # Constructing R:
     R = scs.diags([Oerror**2],[0],[nobs*nt,nobs*nt])
     
-    # So now K is easily computed:
+    # Compute K
     K = B * HT * scs.linalg.inv( ( H * B * HT + R ) )
     
     # And the best estimate:
@@ -222,7 +257,6 @@ def Kalman(y, loc_obs, nt = ntStandard):
     start = time.time()
     
     nobs = len(loc_obs)   
-    
     # Constructing the H matrix:    
     M_empty = scs.diags([0] , [0] , [nx, nx], "csc") # MxM zeros (Top right)
     M_ident = scs.identity(nx) # MxM identity (Top left and bottom left)
@@ -388,9 +422,10 @@ def EnsembleKalman(y, loc_obs,NN , nt = ntStandard):
 # ADJOINT FUNCTIONS
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
         
+dE,dC = [],[]
 def AdjointModel(mismatch):
     '''
-    Uses the adjoint model to calculate dJ/dx.
+    Uses the adjoint model to calculate the second term in dJ/dx.
     In the adjoint we split operations on C in the emissions E and all other 
     operations (advection, diffusion & radioactive decay).
     Returns HT * R^(-1) * (Hx - y) (2nx x 1: one part of dJ/dx)
@@ -399,8 +434,8 @@ def AdjointModel(mismatch):
     # Useful constants 
     nobs = len(loc_obsA)
     b = 1 - lamb*dt - 2*kap * dt/dx**2
-    c = kap * dt/dx**2 - u*dt/dx
-    a = kap * dt/dx**2 + u*dt/dx
+    c = kap * dt/dx**2 - 0.5 * u*dt/dx
+    a = kap * dt/dx**2 + 0.5 * u*dt/dx
     
     # Sensitivities
     dC = np.zeros(nx)
@@ -422,6 +457,7 @@ def AdjointModel(mismatch):
         for m in range(nx):
             dC_temp[m] = c * dC[m-1] + b * dC[m] + a * dC[(m+1) % nx]
         dC = dC_temp.copy()
+    
     
     return np.concatenate((dE,dC))
     
@@ -493,35 +529,62 @@ def calc_mismatch(x0):
     C_obs = obs_oper(C)
     mismatch = np.array(C_obs - dataA)
     return mismatch
-    
-def calc_J(x0):
+
+reduction = 1e-6
+J_obs = []
+J_prior = []
+change = []
+def calc_J(xp):
     '''
-    Calculates the cost function J from the guess x0.
+    Calculates the cost function J from the preconditioned state xp.
     '''
-    
-    mismatch = calc_mismatch(x0)
-    delx = x0 - x_priorA
-    Jobs = 0.5*np.sum((mismatch / Oerror) **2)
+    if precon:
+        x = precon_to_state(xp)
+    else:
+        x = xp
+    mismatch = calc_mismatch(x)
+    delx = x - x_priorA
+    change.append(np.sum(np.array(delx)))
+    Jobs = 0.5 * np.sum((mismatch / Oerror) **2)
     Jprior = 0.5 * np.dot(delx.transpose(), np.dot(B_inv, delx))
+    J_obs.append(Jobs)
+    J_prior.append(Jprior)
     #print 'Jobs, Jprior = ',Jobs,Jprior
     #print 'x0: ', np.sum(abs(x0))
-    print 'J:',(Jobs + Jprior)*1e-5
-    return (Jobs + Jprior)*1e-5
+    print 'J:',(Jobs + Jprior)*reduction
+    return (Jobs + Jprior)*reduction
     
-def calc_dJdx(x0):
+def calc_dJdx(xp):
     '''
     Computes derivative dJ/dx from the guess x0
     '''
-    
-    mismatch = calc_mismatch(x0)
+    if precon:
+        x = precon_to_state(xp)
+    else:
+        x = xp
+    mismatch = calc_mismatch(x)
     adjoint = AdjointModel( mismatch )
-    delx = x0 - x_priorA
+    delx = x - x_priorA
     dJdx = np.dot(B_inv, delx) + adjoint 
+    if precon:
+        dJdxp = np.dot( L_adj, dJdx )
+    else:
+        dJdxp = dJdx
     #print 'dJdx (adjoint, prior) =',np.sum(adjoint),np.sum(np.dot(B_inv,delx))
-    print 'deriv:',1e-5*max(abs(dJdx))
-    return dJdx*1e-5
+    print 'deriv:',max( abs(dJdxp) ) * reduction    
+    return dJdxp*reduction
         
+def state_to_precon(x):
+    '''
+    Convert the state and derivative to the preconditioned space.
+    '''
+    return np.dot( L_inv, (x - x_priorA) ) 
 
+def precon_to_state(xp):
+    '''
+    Convert the preconditioned state to the original space.
+    '''
+    return np.dot( L, xp ) + x_priorA
 
 
 # RESIDUALS
@@ -562,3 +625,10 @@ def resiComplete(E_est,C_est,E_exact,C_exact,E_prior,C_prior):
         residuE.append(100 * resE/resEPrior)
         residuC.append(100 * resC/resCPrior)
     return np.array(residuE), np.array(residuC)
+    
+def resiCompleteSingle(E_est,C_est,E_exact,C_exact,E_prior,C_prior,nt=ntStandard):
+    resEPrior = resiCalc(E_prior,E_exact)
+    resCPrior = resiCalc(C_prior[:nt],C_exact[:nt])
+    resE = resiCalc(E_est,E_exact)/resEPrior
+    resC = resiCalc(C_est[:nt], C_exact[:nt])/resCPrior
+    return 100*resE, 100*resC

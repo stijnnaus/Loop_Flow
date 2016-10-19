@@ -19,7 +19,7 @@ Created on Wed Sep 28 14:20:53 2016
 def grad_test(x0,pert = 10**(-5)):
     nx = len(x0)/2
     x0 = np.array(x0)
-    
+    x_priorA = x0
     deriv = calc_dJdx(x0)
     dE,dC = deriv[:nx], deriv[nx:]
     J_prior = calc_J(x0)
@@ -33,9 +33,6 @@ def grad_test(x0,pert = 10**(-5)):
         predict = pert*deriv[i]
         J_post = calc_J(x0_pert)
         reduct = (J_post - J_prior)
-        
-        
-        print reduct,predict
         if predict == reduct == 0:
             val = 0
         else:

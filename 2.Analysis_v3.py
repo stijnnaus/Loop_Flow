@@ -23,10 +23,17 @@ times = []
 randomrun = False # If true, a run with randomly distributed stations is also done
 random.seed(seed)
 
+# Which methods to run
+run_BLUE = True
+run_KF = True
+run_KE = True
+KEextensive = False
+long_runs = False # If False, only runs the methods for the standard settings
 
 # ------------------------------------------------------------------------------
 # Parameters that are fixed through each individual run
 # Simulation parameters
+precon = True # Preconditioning on or off
 (nx,dx) = (int(1e2), 2e4)   # nx grid cells; grid size (m)
 ntMax = 30000               # Maximum number of timesteps
 ntSteady = 3000             # Number of steps to steady state
@@ -40,36 +47,48 @@ print cond1, cond2
 # Emission parameters
 nsource = 4                 # Number of sources
 loc_source = [ random.randint(0,nx-1) for i in range(nsource) ]  # Source locations (random)
-Ewidth = 20                 # Peak width for each (Gaussian) source
+Ewidth = 3                 # Peak width for each (Gaussian) source
 maxStrength = 1e-3          # Max source strength
 # Inverse model parameters
 E_true = EmissionProfile(loc_source,Ewidth,maxStrength) # True emission profile
 Cstart = np.zeros(nx) # Starting concentration profile (Just 0 everywhere)  
+xtrue = np.concatenate((E_true,Cstart))
 C_real = ForwardModel(E_true, Cstart, nt = ntMax) # The exact model data
 C_steady = ForwardModel(E_true, Cstart, nt = ntSteady) # Steady state model data
 # Errors
 Eerror = 0.1 * max(E_true)          # emission error
-Cerror = 0.03 * np.mean(C_real[-1]) # prior error
-Oerror = 0.01 * np.mean(C_real[-1]) # observation error
-# Construct prior error (/variance) matrix B
+Cerror = 5e-3 # prior error
+Oerror = 1e-2 # observation error as used in the inversions
+Oerror_real = Oerror # the actual imposed error
+# Construct prior error (/variance) matrix B, possibly with preconditioning
 priorError = np.array([Eerror**2]*nx+[Cerror**2]*nx)
 Bmatrix = np.matrix( np.diag(priorError) )
+if precon: # Preconditioning
+    cmax = .75
+    sigE = 4.
+    sigC = 4.
+    corrE = [cmax * np.exp(-((i/sigE)**2)) for i in range(nx)]
+    corrC = [cmax * np.exp(-((i/sigC)**2)) for i in range(nx)]
+    Bmatrix = preCon(Bmatrix,corrE,corrC)
 Bmatrix_inv = np.linalg.inv(Bmatrix)
 B_inv = np.array(Bmatrix_inv)
+
+
 
 nobsStandard = 3 # Number of measurement stations
 loc_obsStandard = genStations(nobsStandard, rand = False) # Standard locations meas stations
 # Generating input data
 data = genData(C_real, loc_obsStandard) # Observations 
-E_prior = prior(E_true,Eerror) # Prior E
-C0_prior = [ np.random.normal(0,Oerror) for i in range(nx) ] # Prior C0
-x0 = np.concatenate([E_prior,C0_prior]) # Prior state
+x0 = np.random.multivariate_normal(xtrue,Bmatrix)
+E_prior,C0_prior = x0[:nx],x0[nx:]
 C_priorForward = ForwardModel(E_prior,C0_prior,nt = ntMax) # Perturbed model data
 
+
+plt.plot(x0)
+plt.plot(xtrue)
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # BLUE calculations
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-run_BLUE = True
 
 if run_BLUE:
     print 'Running BLUE....'
@@ -171,7 +190,6 @@ if run_BLUE:
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Kalman inversion calculations
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-run_KF = True
 if run_KF:
     print 'Running the Kalman filter .....' 
     # ----------------------------------------------------------
@@ -223,7 +241,6 @@ if run_KF:
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 # Kalman ensemble
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-run_KE = True
 if run_KE:
     print 'Running the Kalman ensemble......'
     
@@ -251,7 +268,6 @@ if run_KE:
         CresKE = ForwardModel(E_resKE[i], np.array([0.]*nx),nt=ntK)
         C_forwKE.append(CresKE)
     C_forwKE = np.array(C_forwKE)
-    
     
     # Varying number of timesteps
     # ----------------------------------------------------------
@@ -303,7 +319,6 @@ if run_KE:
         C_forwOKE.append(CresOKE)
     
 # Extensive KE run
-KEextensive = False
 
 if KEextensive:
 
@@ -351,25 +366,31 @@ print 'Running the Adjoint model......'
 # ---------------------------------------------------------------
 # STANDARD RUN
 
+tol = 1e-5
 loc_obsA = loc_obsStandard
 nobsA = len(loc_obsA)
 ntA = ntStandard
 x_priorA = x0
 dataA = np.array( np.split( data[:nobsA*ntA], ntA ) )
 
-x_opt = sc.optimize.fmin_bfgs(calc_J, x0, calc_dJdx,gtol = 1e-3, retall = True, disp = True )
+x_opt = sc.optimize.fmin_cg(calc_J, x0, calc_dJdx,gtol = tol, retall = True, disp = True, epsilon = 1e-30)
 E_resA = x_opt[0][:nx]
 C_resA = x_opt[0][nx:]
 
 C_forwA = ForwardModel(E_resA, C_resA, ntA)
 
-for i,x in enumerate(x_opt[1]):
-    if i%3 == 0:
-        plt.plot(x,label = 'fit' + str(i))
-plt.plot(x_opt[0], label = 'Final')
-plt.plot(x_priorA, label = 'Prior')
-plt.legend(loc = 'best')
+#plt.figure()
+#for i,x in enumerate(x_opt[1]):
+#    if i%3 == 0:
+#        plt.plot(x,label = 'fit' + str(i))
+#plt.plot(x_opt[0], label = 'Final')
+#plt.plot(x_priorA, label = 'Prior')
+#plt.legend(loc = 'best')
     
+plt.figure()
+plt.plot(J_obs,label='obs')
+plt.plot(J_prior,label='prior')
+plt.legend()
 
 # ---------------------------------------------------------------
 # VARYING TIMESTEP
@@ -383,7 +404,7 @@ for i,steps in enumerate(ntAT):
     ntA = steps
     dataA = np.array( np.split( data[:nobsA*ntA], ntA ) )
     
-    x_temp = sc.optimize.fmin_bfgs( calc_J, x0, calc_dJdx,gtol = 1e-3 , retall = True, disp = True )
+    x_temp = sc.optimize.fmin_bfgs( calc_J, x0, calc_dJdx,gtol = tol , retall = True, disp = True )
     E_resAT.append( x_temp[0][:nx] )
     C_resAT.append( x_temp[0][nx:] )
     x_optAT.append( x_temp[0] )
@@ -392,6 +413,7 @@ for i,steps in enumerate(ntAT):
     C_forwAT.append( ForwardModel(E_resAT[i], C_resAT[i], ntA) )
     end = time.time()
     print end-start
+    plt.plot(x_temp)
     
 E_resAT,C_resAT,C_forwAT = np.array(E_resAT),np.array(C_resAT),np.array(C_forwAT)
     
@@ -409,7 +431,7 @@ for i,stations in enumerate(nobsAO):
     loc_obsA = genStations(nobsA)
     dataA = np.array( np.split( genData(C_real, loc_obsA, ntA), ntA ) )
     
-    x_temp = sc.optimize.fmin_bfgs( calc_J, x0, calc_dJdx,gtol = 1e-3 , retall = True, disp = True)
+    x_temp = sc.optimize.fmin_bfgs( calc_J, x0, calc_dJdx,gtol = tol , retall = True, disp = True)
     E_resAO.append( x_temp[0][:nx] )
     C_resAO.append( x_temp[0][nx:] )
     x_optAO.append( x_temp[0] )
@@ -425,7 +447,7 @@ E_resAO,C_resAO,C_forwAO = np.array(E_resAO),np.array(C_resAO),np.array(C_forwAO
     
     
     
-    
+
     
     
     

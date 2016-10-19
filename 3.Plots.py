@@ -22,15 +22,10 @@ from matplotlib import rcParams
 # +++++++++++++++++++ PLOTTING ++++++++++++++++++++++++++++
 # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-plt.figure()
-plt.plot(C_resA)
-plt.plot(C0_prior)
-
 # General definitions
-
-add = '_Add_Adjoint' # An addition to plot names to describe the experiment
+add = '_Preconditioned_wide' # An addition to plot names to describe the experiment
 rcParams.update({'figure.autolayout': True})
-markertype = ['b-','b-.','b--','k-','k-.','k--','c-','c-.','c--','r-','r-.','r--']
+markertype = ['b-','b.-','b--','k-','k.-','k--','c-','c.-','c--']
 x = [i*dx/1000. for i in range(nx)]
 ntTMax = max(ntT)
 ntTMin = min(ntT)
@@ -63,6 +58,22 @@ plt.savefig('Steady_Delta_C')
 
 # Varying timestep
 
+# CONCENTRATIONS
+fig1 = plt.figure()
+ax1 = fig1.add_subplot(111) # Concentrations
+ax1.set_title("The concentrations at timestep "+str(ntTMax))
+ax1.plot(x,C_forwT[-1][ntTMax-1],'b',label='Optimized, even (BLUE)')
+ax1.plot(x,C_real[ntTMax-1],'g',label='Original')
+ax1.plot(x,C_priorForward[ntTMax-1],'r',label='Prior')
+ax1.plot(loc_obsStandard*dx/1000.,[0]*len(loc_obsStandard),'bo',markersize=14,label = 'Even stations')
+if randomrun:
+    ax1.plot(x,C_forwTR[-1][-1],'r.-',label='Optimized, random')
+    ax1.plot(loc_obsStandardR*dx/1000.,[0]*len(loc_obsStandardR),'bs',markersize=14,label = 'Random stations')
+ax1.set_xlabel("Position (in km)")
+ax1.set_ylabel("Concentration (unitless)")
+ax1.legend(loc='best')
+plt.show()
+
 # CONCENTRATIONS AT T = 500
 fig_con = plt.figure()
 ax1 = fig_con.add_subplot(111)
@@ -70,6 +81,9 @@ ax1.plot(x, C_forwT[2][-1],label='Even, BLUE')
 ax1.plot(x, C_priorForward[499], label = 'Prior')
 ax1.plot(x, C_forwA[499], label = 'Adjoint')
 ax1.plot(x, C_real[499], label = 'Exact')
+for i,loc in enumerate(loc_obsA):
+    print loc*dx/1000, dataA[-1][i]
+    ax1.plot(loc*dx/1000, dataA[-1][i],'ro',markersize = 7)
 ax1.plot(x,C_resKE[-1],label = 'KE (size: '+str(NN[-1]) + ')')
 ax1.plot(loc_obsStandard*dx/1000.,[0]*len(loc_obsStandard),'bo',markersize=14,label = 'Stations')
 
@@ -95,6 +109,11 @@ ax1.set_ylabel("Emissions (unitless)")
 ax1.legend(loc='best')
 plt.savefig('Emissions_t500'+add)
 
+plt.figure()
+plt.plot(x,[E_prior[i]-E_resA[i] for i in range(nx)])
+plt.savefig("Emissions_Prior_min_Adjoint"+add)
+
+
 # Concentrations per station
 
 fig_emiB = plt.figure()
@@ -103,7 +122,6 @@ for n,j in enumerate(loc_obsStandard):
     ax1.plot( [C_forwT[2][i][j] for i in range(len(C_forwT[2]))], markertype[n], label='BLUE at ' + str(j) )
     ax1.plot( [C_forwOKE[1][i][j] for i in range(len(C_forwT[2]))], markertype[n+3], label='KE at ' + str(j) )
     ax1.plot( [C_real[i][j] for i in range(len(C_forwT[2]))], markertype[n+6], label='Real at ' + str(j) )
-    ax1.plot( [C_forwA[i][j] for i in range(len(C_forwT[2]))], markertype[n+9], label='Adjoint at ' + str(j))
 ax1.set_xlabel('Time step')
 ax1.set_ylabel('Concentration (unitless)')
 ax1.legend(loc='best')
@@ -112,7 +130,6 @@ ax1.legend(loc='best')
 residuTE, residuTC = resiComplete(E_resT,C_forwT,E_true,C_real,E_prior,C_priorForward)
 residuTKE, residuTKC = resiComplete(E_resTKE, C_forwTKE, E_true, C_real, E_prior, C_priorForward)
 residuATE, residuATC = resiComplete(E_resAT, C_forwAT, E_true, C_real, E_prior, C_priorForward)
-#residuATE2, residuATC2 = resiComplete(E_resAT2, C_forwAT2, E_true, C_real, E_prior, C_priorForward)
 
 if randomrun:
     residuTRE, residuTRC = resiComplete(E_resTR,C_forwTR,E_true,C_real,E_prior,C_priorForward)
@@ -157,8 +174,6 @@ residuOE, residuOC = resiComplete(E_resO,C_forwO,E_true,C_real,E_prior,C_priorFo
 residuOKE, residuOKC = resiComplete(E_resOKE, C_forwOKE, E_true, C_real, E_prior, C_priorForward)
 residuAOE, residuAOC = resiComplete(E_resAO, C_forwAO, E_true, C_real, E_prior, C_priorForward)
 
-
-
 fig3 = plt.figure()
 ax1 = fig3.add_subplot(111)
 ax2 = ax1.twinx()
@@ -168,7 +183,7 @@ ax2.plot(nobsO,residuOC, 'b', label = 'C, BLUE')
 ax1.plot(nobsO, residuOKE[:len(nobsO)], 'r--', label = 'E, KE')
 ax2.plot(nobsO, residuOKC[:len(nobsO)], 'b--', label = 'C, KE')
 ax1.plot(nobsO, residuAOE[:len(nobsO)], 'r-.', label = 'E, adjoint')
-ax2.plot(nobsO, residuAOC[:len(nobsO)], 'b-.', label = 'C, adjoint')
+ax1.plot(nobsO, residuAOC[:len(nobsO)], 'b-.', label = 'C, adjoint')
 if randomrun:
     ax1.plot(nobsO, residuOR, 'b--', label = 'E, random')
     ax2.plot(nobsO, residuOC, 'b--', label = 'C, random')
@@ -183,18 +198,23 @@ figg = plt.figure()
 ax1 = figg.add_subplot(111)
 ax2 = ax1.twinx()
 ax1.set_title("The effect of the number of measurement stations on the\n residuals in the KE (N = 300) and adjoint approach")
-ax1.plot(nobsOKE[2:],residuOKE[2:],'r',label = 'E, KE')
-ax2.plot(nobsOKE[2:],residuOKC[2:],'b',label = 'C, KE')
-ax1.plot(nobsAO, residuAOE,'r--',label = 'E, adjoint')
-ax2.plot(nobsAO, residuAOC,'b--',label = 'C, adjoint')
+ax1.plot(nobsOKE[5:],residuOKE[5:],'r',label = 'E, KE')
+ax2.plot(nobsOKE[5:],residuOKC[5:],'b',label = 'C, KE')
+ax1.plot(nobsAO[2:], residuAOE[2:],'r--',label = 'E, adjoint')
+ax1.plot(nobsAO[2:], residuAOC[2:],'b--',label = 'C, adjoint')
 ax1.set_ylabel("Emission residu (% of prior)")
 ax2.set_ylabel("Concentration residu (% of prior)")
-ax1.legend(loc = 2)
-ax2.legend(loc= 1)
+ax1.legend(loc = 1)
+ax2.legend(loc= 2)
 plt.savefig('VarObs_KE'+add)
 
 
-
+plt.figure()
+for i in range(9,12):
+    plt.plot(E_resOKE[i],label='KE')
+plt.plot(E,label = 'Real')
+plt.plot(E_prior, label = 'Prior')
+plt.legend(loc='best')
 '''
 # -----------------------------------------------------
 # Kalman filter

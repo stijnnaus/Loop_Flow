@@ -189,7 +189,7 @@ def BLUEAnalysis(y, loc_obs, nt = ntStandard):
     # Bottom right matrix
     q = kap * dt/dx**2
     q2 = 2*q
-    s = u*dt/dx
+    s = 0.5*u*dt/dx
     lt = lamb*dt
     b = 1 - lt - q2
     c = q - s
@@ -264,7 +264,7 @@ def Kalman(y, loc_obs, nt = ntStandard):
     # Bottom right matrix
     q = kap * dt/dx**2
     q2 = 2*q
-    s = u*dt/dx
+    s = .5 * u*dt/dx
     lt = lamb*dt
     b = 1 - lt - q2
     c = q - s
@@ -321,9 +321,10 @@ def Kalman(y, loc_obs, nt = ntStandard):
 def EnsembleKalman(y, loc_obs,NN , nt = ntStandard):
     '''
     The model for the ensemble Kalman approach.
-    In this approach we evolve the model NN times, starting from perturbed
+    In this approach we iteratively run the model NN times, starting from perturbed
     x and B matrices. The perturbations are proportional to the E and C errors.
     '''
+    
     random.seed(seed)
     start = time.time()
     
@@ -335,8 +336,8 @@ def EnsembleKalman(y, loc_obs,NN , nt = ntStandard):
     
     # Bottom right matrix
     b = 1 - lamb*dt - 2*kap * dt/dx**2
-    c = kap * dt/dx**2 - u*dt/dx
-    a = kap * dt/dx**2 + u*dt/dx
+    c = kap * dt/dx**2 - 0.5 * u*dt/dx
+    a = kap * dt/dx**2 + 0.5 * u*dt/dx
     abc_diag = scs.diags([ [a] , [b] , [c] , [a] , [c] ], [-1 , 0 , 1 , nx-1 , -nx+1],  [nx,nx], "csc")
     
     # Combine into forward matrix

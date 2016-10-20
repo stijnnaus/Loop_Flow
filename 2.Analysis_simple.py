@@ -121,7 +121,7 @@ print 'Running the Adjoint model......'
 # ---------------------------------------------------------------
 # STANDARD RUN
 
-tol = 1e-5
+tol = 1e-4
 loc_obsA = loc_obsStandard
 nobsA = len(loc_obsA)
 ntA = ntStandard

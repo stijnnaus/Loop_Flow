@@ -206,7 +206,7 @@ def tostate(E,C,u):
 # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 times = []
 
-experiment = 'TigherE'
+experiment = 'TightestE'
 
 # ------------------------------------------------------------------------------
 # Parameters that are fixed through each individual run
@@ -234,7 +234,7 @@ xtrue = tostate(E_true,Cstart,utrue)
 C_real = ForwardModelTL(xtrue, nt = ntMax) # The exact model data
 C_steady = ForwardModelTL(xtrue, nt = ntSteady) # Steady state model data
 # Errors
-Eerror = 1e-4 * max(E_true)          # emission error
+Eerror = 1e-1 * max(E_true) # emission error
 Cerror = 5e-8 # prior error
 Oerror = 1e-3 # observation error as used in the inversions
 Uerror = 10.
@@ -252,7 +252,6 @@ loc_obsStandard = genStations(nobsStandard, rand = False) # Standard locations m
 # Generating input data
 data = genData(C_real, loc_obsStandard) # Observations 
 x0 = np.random.multivariate_normal(xtrue,Bmatrix)
-x0[-1] = 0.
 C_priorForward = ForwardModelTL(x0,nt = ntMax) # Perturbed model data
 
 plt.plot(x0[:-1])
@@ -267,7 +266,7 @@ print 'Running the Adjoint Tangent Linear model......'
 # ---------------------------------------------------------------
 # STANDARD RUN
 
-tol = 1e-5
+tol = reduction*1e-3
 loc_obsA = loc_obsStandard
 nobsA = len(loc_obsA)
 ntA = ntStandard
@@ -281,14 +280,6 @@ U_resA = x_opt[-1]
 u = U_resA
 C_forwA = ForwardModelTL(x_opt, ntA)
 
-plt.figure()
-#for i,x in enumerate(x_opt[1]):
-#    if i%3 == 0:
-#        plt.plot(x[:-1],label = 'fit' + str(i))
-plt.plot(x_opt[:-1], label = 'Final')
-plt.plot(x_priorA[:-1], label = 'Prior')
-plt.plot(xtrue[:-1])
-plt.legend(loc = 'best')
 
 x = [i*dx/1000. for i in range(nx)]
 fig1 = plt.figure()
@@ -298,11 +289,11 @@ ax1.plot(x, C_forwA[ntStandard-1], label = 'Adjoint')
 ax1.plot(x, C_real[ntStandard-1], label = 'Exact')
 for i,loc in enumerate(loc_obsA):
     ax1.plot(loc*dx/1000, dataA[-1][i],'ro',markersize = 7)
-ax1.set_title("Concentrations Adjoint Tangent Linear")
+ax1.set_title("Concentrations Adjoint Tangent Linear \n(upri = "+str(round(x0[-1],2))+", upost = "+str(round(x_opt[-1],2))+")")
 ax1.set_xlabel("Position (in km)")
 ax1.set_ylabel("Concentrations (unitless)")
 ax1.legend(loc='best')
-plt.savefig('AdjointTL_Concentrations_TightE')
+plt.savefig('AdjointTL_Concentrations_'+experiment)
 
 fig_emi = plt.figure()
 ax1 = fig_emi.add_subplot(111)
@@ -310,7 +301,7 @@ ax1.plot(x, E_resA,'b', label = 'Adjoint')
 ax1.plot(x, x0[:nx],'r' ,label = 'Prior')
 ax1.plot(x, E_true,'g', label = 'Exact')
 ax1.plot(loc_obsStandard*dx/1000.,[0]*len(loc_obsStandard),'bo',markersize=14,label = 'Stations')
-ax1.set_title("Resulting emissions. nt = 500, nobs = 3")
+ax1.set_title("Resulting emissions Adjoint TL")
 ax1.set_xlabel("Position (in km)")
 ax1.set_ylabel("Emissions (unitless)")
 ax1.legend(loc='best')

@@ -62,7 +62,7 @@ Oerror_real = Oerror # the actual imposed error
 priorError = np.array([Eerror**2]*nx+[Cerror**2]*nx)
 Bmatrix_start = np.matrix( np.diag(priorError) )
 Bmatrices = []
-cor_len = [0.01,1.,3.,8.,12.]
+cor_len = [0.01,1.,3.,8.,12.,20.]
 for cor in cor_len:
     corr = [np.exp(-((i/cor))) for i in range(1,nx+1)]
     Bmatrixi = preCon( Bmatrix_start,corr,corr )
@@ -88,6 +88,8 @@ C_forB, C_forKF, C_forKE, C_forA = [],[],[],[] # Forward concentrations
 E_residB, E_residKF, E_residKE, E_residA = [],[],[],[] # Residuals
 C_residB, C_residKF, C_residKE, C_residA = [],[],[],[] # Residuals
 savL = []
+for i in range(len(cor_len)):
+    plt.plot(E_priors[i])
 for ii,Bmatrixi in enumerate(Bmatrices):
     
     Bmatrix, Bmatrix_inv = Bmatrixi, np.linalg.inv(Bmatrixi)

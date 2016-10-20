@@ -223,7 +223,6 @@ def BLUEAnalysis(y, loc_obs, nt = ntStandard):
     # Constructing B: Two types of errors (Emission & Concentration)
     B = scs.csc_matrix(Bmatrix)
     Ba = np.array(Bmatrix)
-    print ' B element [0][1] and [0][2]', Ba[0][1],Ba[0][2]
     
     # Constructing R:
     R = scs.diags([Oerror**2],[0],[nobs*nt,nobs*nt])

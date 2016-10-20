@@ -186,7 +186,6 @@ def calc_dJdxTL(xp):
     dJdxp = np.dot(L_adj, dJdx)
     #print 'dJdx (adjoint, prior) =',np.sum(adjoint),np.sum(np.dot(B_inv,delx))
     print 'deriv:',max(abs(dJdxp))*reduction
-    print 'u:',u_old
     return dJdxp*reduction
     
 def tostate(E,C,u):
@@ -251,98 +250,119 @@ random.seed(seed)
 
 
 experiment = 'Standard2'
+uposts = []
+for hes in range(20):
+    # ------------------------------------------------------------------------------
+    # Parameters that are fixed through each individual run
+    # Simulation parameters
+    precon = True               # Preconditioning on or off
+    (nx,dx) = (int(1e2), 2e4)   # nx grid cells; grid size (m)
+    ntMax = 30000               # Maximum number of timesteps
+    ntSteady = 3000             # Number of steps to steady state
+    dt = 8e1                    # time step (s)
+    kap = 2e6                   # Diffusivity coefficient (m2/s)
+    lamb = 4e-5                 # Decay constant 
+    utrue = 10                  # True advection wind speed (m/s)
+    cond1 = kap * dt / dx**2    # Stability criterion 1
+    cond2 = utrue * dx / kap        # Stability criterion 2
+    print cond1, cond2
+    # Emission parameters
+    nsource = 4                 # Number of sources
+    loc_source = [ random.randint(0,nx-1) for i in range(nsource) ]  # Source locations (random)
+    Ewidth = 3                 # Peak width for each (Gaussian) source
+    maxStrength = 1e-3          # Max source strength
+    # Inverse model parameters
+    E_true = EmissionProfile(loc_source,Ewidth,maxStrength) # True emission profile
+    Cstart = np.zeros(nx) # Starting concentration profile (Just 0 everywhere)  
+    xtrue = tostate(E_true,Cstart,utrue)
+    C_real = ForwardModelTL(xtrue, nt = ntMax) # The exact model data
+    C_steady = ForwardModelTL(xtrue, nt = ntSteady) # Steady state model data
+    # Errors
+    Eerror = 1e-1 * max(E_true)          # emission error
+    Cerror = 5e-8 # prior error
+    Oerror = 1e-3 # observation error as used in the inversions
+    Uerror = 5.
+    Oerror_real = Oerror # the actual imposed error
+    # Construct prior error (/variance) matrix B, possibly with preconditioning
+    priorError = np.array([Eerror**2]*nx+[Cerror**2]*nx + [Uerror**2])
+    Bmatrix = np.matrix( np.diag(priorError) )
+    if precon: # Preconditioning
+        cor_lenE = 5
+        cor_lenC = 5
+        corrE = [np.exp(-((i/cor_lenE))) for i in range(1,nx+1)]
+        corrC = [np.exp(-((i/cor_lenC))) for i in range(1,nx+1)]
+        Bmatrix = preConTL( Bmatrix,corrE,corrC )
+    Bmatrix_inv = np.linalg.inv(Bmatrix)
+    B_inv = np.array(Bmatrix_inv)
+    
+    
+    nobsStandard = 3 # Number of measurement stations
+    loc_obsStandard = genStations(nobsStandard, rand = False) # Standard locations meas stations
+    # Generating input data
+    data = genData(C_real, loc_obsStandard) # Observations 
+    x0 = np.random.multivariate_normal(xtrue,Bmatrix) # Prior state
+    x0[-1] = 0.0
+    C_priorForward = ForwardModelTL(x0,nt = ntMax) # Perturbed model data
+    
+    
+    
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    # Adjoint TL model
+    # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    
+    print 'Running the Adjoint Tangent Linear model......'
+    # ---------------------------------------------------------------
+    # STANDARD RUN
+    
+    L = np.sqrt( np.array(Bmatrix) )
+    L_inv,L_adj = np.linalg.inv(L), np.transpose(L)
+    
+    tol = 1e-5
+    loc_obsA = loc_obsStandard
+    nobsA = len(loc_obsA)
+    ntA = ntStandard
+    x_priorA = x0.copy()
+    dataA = np.array( np.split( data[:nobsA*ntA], ntA ) )
+    
+    x0p = state_to_precon(x0)
+    x_optp = sc.optimize.fmin_cg(calc_JTL, x0p, calc_dJdxTL,gtol = 1e-3, retall = True, disp = True, maxiter = 80)
+    x_opt = precon_to_state(x_optp[0])
+    E_resA = x_opt[:nx]
+    C_resA = x_opt[nx:-1]
+    U_resA = x_opt[-1]
+    
+    C_forwA = ForwardModelTL(x_opt, ntA)
+    
+    #for i,x in enumerate(x_opt[1]):
+    #    if i%3 == 0:
+    #        plt.plot(x[:-1],label = 'fit' + str(i))
+    #plt.figure()
+    #plt.plot(x_opt[:-1], label = 'Final')
+    #plt.plot(x_priorA[:-1], label = 'Prior')
+    #plt.plot(xtrue[:-1])
+    #plt.legend(loc = 'best')
+    uposts.append(x_opt[-1])
+    print 'Iteration:',len(uposts)
 
-# ------------------------------------------------------------------------------
-# Parameters that are fixed through each individual run
-# Simulation parameters
-precon = True               # Preconditioning on or off
-(nx,dx) = (int(1e2), 2e4)   # nx grid cells; grid size (m)
-ntMax = 30000               # Maximum number of timesteps
-ntSteady = 3000             # Number of steps to steady state
-dt = 8e1                    # time step (s)
-kap = 2e6                   # Diffusivity coefficient (m2/s)
-lamb = 4e-5                 # Decay constant 
-utrue = 10                  # True advection wind speed (m/s)
-cond1 = kap * dt / dx**2    # Stability criterion 1
-cond2 = utrue * dx / kap        # Stability criterion 2
-print cond1, cond2
-# Emission parameters
-nsource = 4                 # Number of sources
-loc_source = [ random.randint(0,nx-1) for i in range(nsource) ]  # Source locations (random)
-Ewidth = 3                 # Peak width for each (Gaussian) source
-maxStrength = 1e-3          # Max source strength
-# Inverse model parameters
-E_true = EmissionProfile(loc_source,Ewidth,maxStrength) # True emission profile
-Cstart = np.zeros(nx) # Starting concentration profile (Just 0 everywhere)  
-xtrue = tostate(E_true,Cstart,utrue)
-C_real = ForwardModelTL(xtrue, nt = ntMax) # The exact model data
-C_steady = ForwardModelTL(xtrue, nt = ntSteady) # Steady state model data
-# Errors
-Eerror = 1e-1 * max(E_true)          # emission error
-Cerror = 5e-8 # prior error
-Oerror = 1e-3 # observation error as used in the inversions
-Uerror = 5.
-Oerror_real = Oerror # the actual imposed error
-# Construct prior error (/variance) matrix B, possibly with preconditioning
-priorError = np.array([Eerror**2]*nx+[Cerror**2]*nx + [Uerror**2])
-Bmatrix = np.matrix( np.diag(priorError) )
-if precon: # Preconditioning
-    cor_lenE = 5
-    cor_lenC = 5
-    corrE = [np.exp(-((i/cor_lenE))) for i in range(1,nx+1)]
-    corrC = [np.exp(-((i/cor_lenC))) for i in range(1,nx+1)]
-    Bmatrix = preConTL( Bmatrix,corrE,corrC )
-Bmatrix_inv = np.linalg.inv(Bmatrix)
-B_inv = np.array(Bmatrix_inv)
+print np.mean(uposts),np.std(uposts)
+uposts0 = uposts
+E_residA0,  C_residA0  = resiCompleteSingle(E_resA, C_forA, E_true,C_real,E_prior,C_priorForward)
+#uposts1 = uposts
+#E_residA0,  C_residA0  = resiCompleteSingle(E_resA, C_forA, E_true,C_real,E_prior,C_priorForward)
+#uposts2 = uposts
+#E_residA2,  C_residA2  = resiCompleteSingle(E_resA, C_forA, E_true,C_real,E_prior,C_priorForward)
+#uposts3 = uposts
+#E_residA3,  C_residA3  = resiCompleteSingle(E_resA, C_forA, E_true,C_real,E_prior,C_priorForward)
+#uposts4 = uposts
+#E_residA4,  C_residA4  = resiCompleteSingle(E_resA, C_forA, E_true,C_real,E_prior,C_priorForward)
+
+starts = [0.1,5.5,8.0,10.0,12.0]
+means = [np.mean(uposts1),np.mean(uposts1),np.mean(uposts2),np.mean(uposts3),np.mean(uposts4)]
+errors = [np.std(uposts1),np.std(uposts1),np.std(uposts2),np.std(uposts3),np.std(uposts4)]
+plt.errorbar(starts,means,yerr = errors, fmt = 'o')
 
 
-nobsStandard = 3 # Number of measurement stations
-loc_obsStandard = genStations(nobsStandard, rand = False) # Standard locations meas stations
-# Generating input data
-data = genData(C_real, loc_obsStandard) # Observations 
-x0 = np.random.multivariate_normal(xtrue,Bmatrix) # Prior state
-x0[-1] = 5.5
-C_priorForward = ForwardModelTL(x0,nt = ntMax) # Perturbed model data
-
-
-
-# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-# Adjoint TL model
-# +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-print 'Running the Adjoint Tangent Linear model......'
-# ---------------------------------------------------------------
-# STANDARD RUN
-
-L = np.sqrt( np.array(Bmatrix) )
-L_inv,L_adj = np.linalg.inv(L), np.transpose(L)
-
-tol = 1e-5
-loc_obsA = loc_obsStandard
-nobsA = len(loc_obsA)
-ntA = ntStandard
-x_priorA = x0.copy()
-dataA = np.array( np.split( data[:nobsA*ntA], ntA ) )
-
-x0p = state_to_precon(x0)
-x_optp = sc.optimize.fmin_cg(calc_JTL, x0p, calc_dJdxTL,gtol = 1e-3, retall = True, disp = True, maxiter = 80)
-x_opt = precon_to_state(x_optp[0])
-E_resA = x_opt[:nx]
-C_resA = x_opt[nx:-1]
-U_resA = x_opt[-1]
-
-C_forwA = ForwardModelTL(x_opt, ntA)
-
-#for i,x in enumerate(x_opt[1]):
-#    if i%3 == 0:
-#        plt.plot(x[:-1],label = 'fit' + str(i))
-#plt.figure()
-#plt.plot(x_opt[:-1], label = 'Final')
-#plt.plot(x_priorA[:-1], label = 'Prior')
-#plt.plot(xtrue[:-1])
-#plt.legend(loc = 'best')
-
- 
+'''
 x = [i*dx/1000. for i in range(nx)]
 fig1 = plt.figure()
 ax1 = fig1.add_subplot(111)
@@ -368,6 +388,6 @@ ax1.set_xlabel("Position (in km)")
 ax1.set_ylabel("Emissions (unitless)")
 ax1.legend(loc='best')
 plt.savefig('AdjTL_Pre_Emissions_'+experiment)
-
+'''
 print 'Prior u: ',x0[-1]
 print 'Posterior u: ',x_opt[-1]
